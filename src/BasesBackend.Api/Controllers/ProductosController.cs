@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using BasesBackend.Infrastructure;
 using BasesBackend.Domain.Entities;
+using BasesBackend.Dto; // Asegúrate de incluir el using del DTO
 
 namespace BasesBackend.Api.Controllers
 {
@@ -16,10 +17,35 @@ namespace BasesBackend.Api.Controllers
             _context = context;
         }
 
+        // GET: api/Productos
         [HttpGet]
-        public async Task<ActionResult<IEnumerable<Producto>>> GetProductos()
+        public async Task<ActionResult<IEnumerable<ProductoDto>>> GetProductos()
         {
-            return await _context.Productos.ToListAsync();
+            // Consulta cruda a MySQL para cruzar tablas y ejecutar la función SQL evaluadora
+            var sql = @"
+                SELECT 
+                    p.IdProducto, 
+                    p.Codigo, 
+                    p.Nombre, 
+                    p.Detalle, 
+                    p.CantidadActual, 
+                    p.StockCritico, 
+                    p.Bodega, 
+                    p.Pasillo, 
+                    p.Estante,
+                    (SELECT MAX(r.FechaRecepcion) FROM RECEPCION r 
+                     INNER JOIN DETALLE_RECEPCION dr ON r.IdRecepcion = dr.IdRecepcion 
+                     WHERE dr.IdProducto = p.IdProducto) AS UltimoIngreso,
+                    (SELECT MAX(d.FechaDespacho) FROM DESPACHO d 
+                     INNER JOIN DETALLE_DESPACHO dd ON d.IdDespacho = dd.IdDespacho 
+                     WHERE dd.IdProducto = p.IdProducto) AS UltimoDespacho,
+                    fn_VerificarAlertaStock(p.IdProducto) AS EstadoAlerta
+                FROM PRODUCTO p";
+
+            // En EF Core 8, SqlQueryRaw mapea directamente la respuesta SQL al DTO
+            var productos = await _context.Database.SqlQueryRaw<ProductoDto>(sql).ToListAsync();
+            
+            return Ok(productos);
         }
 
         [HttpGet("{id}")]
