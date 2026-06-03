@@ -1,8 +1,10 @@
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using BasesBackend.Infrastructure;
 using BasesBackend.Domain.Entities;
-using BasesBackend.Dto; // Asegúrate de incluir el using del DTO
+using System.Threading.Tasks;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace BasesBackend.Api.Controllers
 {
@@ -11,76 +13,49 @@ namespace BasesBackend.Api.Controllers
     public class ProductosController : ControllerBase
     {
         private readonly AppDbContext _context;
+        public ProductosController(AppDbContext context) { _context = context; }
 
-        public ProductosController(AppDbContext context)
-        {
-            _context = context;
-        }
-
-        // GET: api/Productos
-        [HttpGet]
-        public async Task<ActionResult<IEnumerable<ProductoDto>>> GetProductos()
-        {
-            // Consulta cruda a MySQL para cruzar tablas y ejecutar la función SQL evaluadora
-            var sql = @"
-                SELECT 
-                    p.IdProducto, 
-                    p.Codigo, 
-                    p.Nombre, 
-                    p.Detalle, 
-                    p.CantidadActual, 
-                    p.StockCritico, 
-                    p.Bodega, 
-                    p.Pasillo, 
-                    p.Estante,
-                    (SELECT MAX(r.FechaRecepcion) FROM RECEPCION r 
-                     INNER JOIN DETALLE_RECEPCION dr ON r.IdRecepcion = dr.IdRecepcion 
-                     WHERE dr.IdProducto = p.IdProducto) AS UltimoIngreso,
-                    (SELECT MAX(d.FechaDespacho) FROM DESPACHO d 
-                     INNER JOIN DETALLE_DESPACHO dd ON d.IdDespacho = dd.IdDespacho 
-                     WHERE dd.IdProducto = p.IdProducto) AS UltimoDespacho,
-                    fn_VerificarAlertaStock(p.IdProducto) AS EstadoAlerta
-                FROM PRODUCTO p";
-
-            // En EF Core 8, SqlQueryRaw mapea directamente la respuesta SQL al DTO
-            var productos = await _context.Database.SqlQueryRaw<ProductoDto>(sql).ToListAsync();
-            
-            return Ok(productos);
-        }
-
-        [HttpGet("{id}")]
-        public async Task<ActionResult<Producto>> GetProducto(int id)
-        {
-            var producto = await _context.Productos.FindAsync(id);
-            if (producto == null) return NotFound();
-            return producto;
-        }
-
-        [HttpPost]
-        public async Task<ActionResult<Producto>> PostProducto(Producto producto)
-        {
-            _context.Productos.Add(producto);
-            await _context.SaveChangesAsync();
-            return CreatedAtAction(nameof(GetProducto), new { id = producto.IdProducto }, producto);
-        }
-
-        [HttpPut("{id}")]
-        public async Task<IActionResult> PutProducto(int id, Producto producto)
-        {
-            if (id != producto.IdProducto) return BadRequest();
-            _context.Entry(producto).State = EntityState.Modified;
-            await _context.SaveChangesAsync();
-            return NoContent();
-        }
-
+        [HttpGet] public async Task<ActionResult<IEnumerable<Producto>>> GetProductos() => await _context.Productos.ToListAsync();
+        [HttpGet("{id}")] public async Task<ActionResult<Producto>> GetProducto(int id) { var x = await _context.Productos.FindAsync(id); return x == null ? NotFound() : x; }
+        [HttpPost] public async Task<ActionResult<Producto>> PostProducto(Producto x) { _context.Productos.Add(x); await _context.SaveChangesAsync(); return CreatedAtAction(nameof(GetProducto), new { id = x.IdProducto }, x); }
+        [HttpPut("{id}")] public async Task<IActionResult> PutProducto(int id, Producto x) { if (id != x.IdProducto) return BadRequest(); _context.Entry(x).State = EntityState.Modified; await _context.SaveChangesAsync(); return NoContent(); }
+        
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteProducto(int id)
         {
-            var producto = await _context.Productos.FindAsync(id);
-            if (producto == null) return NotFound();
-            _context.Productos.Remove(producto);
-            await _context.SaveChangesAsync();
-            return NoContent();
+            try {
+                var x = await _context.Productos.FindAsync(id);
+                if (x == null) return NotFound();
+                _context.Productos.Remove(x);
+                await _context.SaveChangesAsync();
+                return NoContent();
+            } catch (DbUpdateException) { 
+                return BadRequest(new { message = "No se pueden eliminar productos que tengan movimientos asociados." }); 
+            }
+        }
+
+        [HttpGet("{id}/alerta-stock")]
+        public async Task<IActionResult> GetAlertaStock(int id, [FromServices] BasesBackend.Infrastructure.Respositories.IProductoRepository repo)
+        {
+            try {
+                var estadoAlerta = await repo.VerificarAlertaStockAsync(id);
+                return Ok(new { idProducto = id, estado = estadoAlerta });
+            } catch (System.Exception ex) { return BadRequest(new { message = ex.Message }); }
+        }
+
+        [HttpGet("monitoreo")]
+        public async Task<IActionResult> GetMonitoreo()
+        {
+            var monitoreo = await _context.Productos.Select(p => new {
+                p.IdProducto, p.Codigo, p.Nombre, p.Bodega, p.Pasillo, p.Estante, p.CantidadActual, p.StockCritico,
+                UltimoIngreso = _context.Set<Recepcion>()
+                    .Where(r => _context.Set<DetalleRecepcion>().Any(dr => dr.IdRecepcion == r.IdRecepcion && dr.IdProducto == p.IdProducto))
+                    .Max(r => (System.DateTime?)r.FechaRecepcion),
+                UltimoDespacho = _context.Set<Despacho>()
+                    .Where(d => _context.Set<DetalleDespacho>().Any(dd => dd.IdDespacho == d.IdDespacho && dd.IdProducto == p.IdProducto))
+                    .Max(d => (System.DateTime?)d.FechaDespacho)
+            }).ToListAsync();
+            return Ok(monitoreo);
         }
     }
 }

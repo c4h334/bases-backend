@@ -1,5 +1,9 @@
 using BasesBackend.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using MySqlConnector;
+using System.Collections.Generic;
+using System.Data;
+using System.Threading.Tasks;
 
 namespace BasesBackend.Infrastructure.Respositories;
 
@@ -42,5 +46,28 @@ public class DespachoRepository : IDespachoRepository
             _context.Despachos.Remove(entity);
             await _context.SaveChangesAsync();
         }
+    }
+
+    public async Task<string> ProcesarDespachoAsync(int idDespacho, int idCliente)
+    {
+        using var command = _context.Database.GetDbConnection().CreateCommand();
+        command.CommandText = "sp_ProcesarDespacho";
+        command.CommandType = CommandType.StoredProcedure; // <-- Aquí está la magia
+
+        command.Parameters.Add(new MySqlParameter("p_IdDespacho", idDespacho));
+        command.Parameters.Add(new MySqlParameter("p_IdCliente", idCliente));
+
+        var pResultado = new MySqlParameter("p_Resultado", MySqlDbType.VarChar, 255)
+        {
+            Direction = ParameterDirection.Output
+        };
+        command.Parameters.Add(pResultado);
+
+        if (command.Connection.State != ConnectionState.Open)
+            await command.Connection.OpenAsync();
+
+        await command.ExecuteNonQueryAsync();
+
+        return (pResultado.Value?.ToString() ?? "Error") ?? "Despacho procesado con éxito.";
     }
 }

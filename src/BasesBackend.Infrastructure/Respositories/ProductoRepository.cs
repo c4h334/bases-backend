@@ -1,5 +1,9 @@
 using BasesBackend.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using MySqlConnector;
+using System.Collections.Generic;
+using System.Data;
+using System.Threading.Tasks;
 
 namespace BasesBackend.Infrastructure.Respositories;
 
@@ -42,5 +46,21 @@ public class ProductoRepository : IProductoRepository
             _context.Productos.Remove(entity);
             await _context.SaveChangesAsync();
         }
+    }
+
+    public async Task<string> VerificarAlertaStockAsync(int idProducto)
+    {
+        using var command = _context.Database.GetDbConnection().CreateCommand();
+        command.CommandText = "SELECT fn_VerificarAlertaStock(@p_IdProducto)";
+        command.CommandType = CommandType.Text;
+
+        var parameter = new MySqlParameter("p_IdProducto", idProducto);
+        command.Parameters.Add(parameter);
+
+        if ((command.Connection?.State ?? System.Data.ConnectionState.Closed) != ConnectionState.Open)
+            await command.Connection.OpenAsync();
+
+        var result = await command.ExecuteScalarAsync();
+        return result?.ToString() ?? "OK";
     }
 }
