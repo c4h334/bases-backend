@@ -3,54 +3,72 @@ DELIMITER $$
 DROP PROCEDURE IF EXISTS sp_ProcesarDespacho$$
 
 CREATE PROCEDURE sp_ProcesarDespacho(
+    IN p_IdDespacho INT,
     IN p_IdCliente INT,
-    IN p_Operario VARCHAR(50),
-    IN p_Estado INT, 
-    IN p_IdProducto INT,
-    IN p_Cantidad INT,
     OUT p_Resultado VARCHAR(255)
 )
 BEGIN
-    DECLARE v_CantidadActual INT;
+    DECLARE v_FaltaStock INT DEFAULT 0;
     
+    -- Manejador de excepciones del sistema
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
         ROLLBACK;
-        SET p_Resultado = 'ERROR: Transacción abortada. Fallo en el proceso de despacho.';
+        SET p_Resultado = 'ERROR: Transacción abortada por fallo del sistema.';
     END;
 
-    IF p_Cantidad <= 0 THEN
-        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'La cantidad a despachar debe ser mayor a cero.';
-    END IF;
+    -- 1. Validar si algún producto en el carrito supera el stock físico actual
+    SELECT COUNT(*) INTO v_FaltaStock
+    FROM CARRITO_DESPACHO c
+    INNER JOIN PRODUCTO p ON c.IdProducto = p.IdProducto
+    WHERE c.IdDespacho = p_IdDespacho AND c.Cantidad > p.CantidadActual;
 
+    -- 2. Iniciar la transacción ACID
     START TRANSACTION;
 
-        SELECT CantidadActual INTO v_CantidadActual 
-        FROM PRODUCTO 
-        WHERE IdProducto = p_IdProducto 
-        FOR UPDATE;
+    IF v_FaltaStock > 0 THEN
+        -- Abortar cualquier posible cambio pendiente
+        ROLLBACK;
+        
+        -- Cambiar estado a CANCELADO (Se hace fuera del rollback para que el cambio persista)
+        UPDATE DESPACHO 
+        SET Estado = 'CANCELADO' 
+        WHERE IdDespacho = p_IdDespacho AND IdCliente = p_IdCliente;
+        
+        -- Limpiar la tabla intermedia (Carrito)
+        DELETE FROM CARRITO_DESPACHO 
+        WHERE IdDespacho = p_IdDespacho;
+        
+        SET p_Resultado = 'ERROR: La orden fue cancelada por falta de stock en uno o más productos (Rollback aplicado).';
+    ELSE
+        -- Si hay stock suficiente para TODO el carrito, se procesa en bloque
+        
+        -- Mover los productos del carrito al detalle oficial
+        INSERT INTO DETALLE_DESPACHO (IdDespacho, IdProducto, Cantidad)
+        SELECT IdDespacho, IdProducto, Cantidad 
+        FROM CARRITO_DESPACHO 
+        WHERE IdDespacho = p_IdDespacho;
 
-        IF v_CantidadActual IS NULL THEN
-            SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'El producto especificado no existe.';
-        ELSEIF v_CantidadActual < p_Cantidad THEN
-            SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Fallo de Consistencia: Stock insuficiente para el despacho.';
-        ELSE
-            INSERT INTO DESPACHO (FechaDespacho, Estado, Operario, IdCliente)
-            VALUES (NOW(), p_Estado, p_Operario, p_IdCliente);
-            
-            SET @v_IdDespacho = LAST_INSERT_ID();
+        -- Descontar el inventario (Esto disparará automáticamente el trigger tg_AuditoriaInventario por cada producto)
+        UPDATE PRODUCTO p
+        INNER JOIN CARRITO_DESPACHO c ON p.IdProducto = c.IdProducto
+        SET p.CantidadActual = p.CantidadActual - c.Cantidad
+        WHERE c.IdDespacho = p_IdDespacho;
 
-            INSERT INTO DETALLE_DESPACHO (IdDespacho, IdProducto, Cantidad)
-            VALUES (@v_IdDespacho, p_IdProducto, p_Cantidad);
+        -- Cambiar el estado a PROCESADO
+        UPDATE DESPACHO 
+        SET Estado = 'PROCESADO' 
+        WHERE IdDespacho = p_IdDespacho AND IdCliente = p_IdCliente;
 
-            UPDATE PRODUCTO 
-            SET CantidadActual = CantidadActual - p_Cantidad
-            WHERE IdProducto = p_IdProducto;
+        -- Limpiar la tabla intermedia (Carrito)
+        DELETE FROM CARRITO_DESPACHO 
+        WHERE IdDespacho = p_IdDespacho;
 
-            COMMIT;
-            SET p_Resultado = CONCAT('ÉXITO: Despacho #', @v_IdDespacho, ' completado con éxito.');
-        END IF;
-
+        -- Confirmar la transacción
+        COMMIT;
+        
+        SET p_Resultado = CONCAT('ÉXITO: Despacho #', p_IdDespacho, ' procesado correctamente en bloque.');
+    END IF;
 END$$
 
 DELIMITER ;
