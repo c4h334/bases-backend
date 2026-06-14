@@ -47,7 +47,7 @@ namespace BasesBackend.Api.Controllers
                                      orderby r.FechaRecepcion descending
                                      select new {
                                          r.IdRecepcion, r.NumeroLote, r.FechaRecepcion, r.UsuarioAtendio,
-                                         Cliente = c.Nombre, dr.Cantidad
+                                         ClienteNombre = c.Nombre, dr.Cantidad
                                      }).ToListAsync();
             return Ok(recepciones);
         }

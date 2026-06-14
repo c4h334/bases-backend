@@ -52,7 +52,7 @@ public class RecepcionRepository : IRecepcionRepository
     {
         using var command = _context.Database.GetDbConnection().CreateCommand();
         command.CommandText = "sp_RegistrarRecepcion";
-        command.CommandType = CommandType.StoredProcedure; // <-- Aquí está la magia
+        command.CommandType = CommandType.StoredProcedure;
 
         command.Parameters.Add(new MySqlParameter("p_NumeroLote", numeroLote));
         command.Parameters.Add(new MySqlParameter("p_UsuarioAtendio", usuarioAtendio));
@@ -66,11 +66,11 @@ public class RecepcionRepository : IRecepcionRepository
         };
         command.Parameters.Add(pResultado);
 
-        if (command.Connection.State != ConnectionState.Open)
+        if (command.Connection!.State != ConnectionState.Open)
             await command.Connection.OpenAsync();
 
         await command.ExecuteNonQueryAsync();
 
-        return (pResultado.Value?.ToString() ?? "Error") ?? "Recepción procesada con éxito.";
+        return pResultado.Value?.ToString() ?? "Recepcion procesada con exito.";
     }
 }

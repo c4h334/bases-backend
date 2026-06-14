@@ -52,7 +52,7 @@ public class DespachoRepository : IDespachoRepository
     {
         using var command = _context.Database.GetDbConnection().CreateCommand();
         command.CommandText = "sp_ProcesarDespacho";
-        command.CommandType = CommandType.StoredProcedure; // <-- Aquí está la magia
+        command.CommandType = CommandType.StoredProcedure;
 
         command.Parameters.Add(new MySqlParameter("p_IdDespacho", idDespacho));
         command.Parameters.Add(new MySqlParameter("p_IdCliente", idCliente));
@@ -63,11 +63,11 @@ public class DespachoRepository : IDespachoRepository
         };
         command.Parameters.Add(pResultado);
 
-        if (command.Connection.State != ConnectionState.Open)
+        if (command.Connection!.State != ConnectionState.Open)
             await command.Connection.OpenAsync();
 
         await command.ExecuteNonQueryAsync();
 
-        return (pResultado.Value?.ToString() ?? "Error") ?? "Despacho procesado con éxito.";
+        return pResultado.Value?.ToString() ?? "Despacho procesado con exito.";
     }
 }
