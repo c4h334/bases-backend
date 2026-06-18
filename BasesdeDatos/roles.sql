@@ -6,6 +6,14 @@ GRANT SELECT, INSERT, UPDATE, DELETE
 ON ProyectoBD2.*
 TO proyecto_operador;
 
+GRANT EXECUTE
+ON PROCEDURE ProyectoBD2.sp_RegistrarRecepcion
+TO proyecto_operador;
+
+GRANT EXECUTE
+ON PROCEDURE ProyectoBD2.sp_ProcesarDespacho
+TO proyecto_operador;
+
 CREATE USER 'joviedo'@'localhost'
 IDENTIFIED BY 'J@cqueline2026!';
 
